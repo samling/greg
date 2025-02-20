@@ -36,6 +36,13 @@ var (
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("240")).
 			Padding(1)
+
+	// Add new styles for pattern breakdown
+	groupStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))  // Cyan
+	metaStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("213")) // Pink
+	quantStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // Orange
+	escapeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("148")) // Green
+	literalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // Light gray
 )
 
 type Model struct {
@@ -203,7 +210,7 @@ func (m Model) View() string {
 
 	var resultsContent string
 	if pattern := m.inputs[0].Value(); pattern != "" {
-		resultsContent = "Pattern breakdown:\n"
+		resultsContent = metaStyle.Render("Pattern breakdown:") + "\n"
 		groupLevel := 0
 		groupCount := 0
 		for i := 0; i < len(pattern); i++ {
@@ -212,22 +219,23 @@ func (m Model) View() string {
 			prefix := fmt.Sprintf("%s%d: %c - ", indent, i+1, char)
 
 			if char == '\\' && i < len(pattern)-1 {
-				// Handle escape sequences
-				i++ // Skip next character
+				i++
 				nextChar := pattern[i]
 				resultsContent += fmt.Sprintf("%s%d: \\%c - ", indent, i, nextChar)
+				desc := ""
 				switch nextChar {
 				case 'd':
-					resultsContent += "Digit (0-9)\n"
+					desc = "Digit (0-9)"
 				case 'w':
-					resultsContent += "Word character\n"
+					desc = "Word character"
 				case 's':
-					resultsContent += "Whitespace\n"
+					desc = "Whitespace"
 				case 'b':
-					resultsContent += "Word boundary\n"
+					desc = "Word boundary"
 				default:
-					resultsContent += fmt.Sprintf("Escaped character '%c'\n", nextChar)
+					desc = fmt.Sprintf("Escaped character '%c'", nextChar)
 				}
+				resultsContent += escapeStyle.Render(desc) + "\n"
 				continue
 			}
 
@@ -236,55 +244,50 @@ func (m Model) View() string {
 			case '(':
 				groupLevel++
 				groupCount++
-				resultsContent += fmt.Sprintf("Start group %d ↓\n", groupCount)
+				resultsContent += groupStyle.Render(fmt.Sprintf("Start group %d ↓", groupCount)) + "\n"
 			case ')':
 				resultsContent = strings.TrimSuffix(resultsContent, prefix)
 				groupLevel = max(0, groupLevel-1)
 				indent = strings.Repeat("  ", groupLevel)
-				resultsContent += fmt.Sprintf("%s%d: %c - End group %d ↑\n", indent, i+1, char, groupLevel+1)
-			case '^':
-				resultsContent += "Start of line\n"
-			case '$':
-				resultsContent += "End of line\n"
+				resultsContent += fmt.Sprintf("%s%d: %c - ", indent, i+1, char) +
+					groupStyle.Render(fmt.Sprintf("End group %d ↑", groupLevel+1)) + "\n"
+			case '^', '$':
+				resultsContent += metaStyle.Render("Start of line") + "\n"
 			case '.':
-				resultsContent += "Any character\n"
-			case '*':
-				resultsContent += "Zero or more of previous\n"
-			case '+':
-				resultsContent += "One or more of previous\n"
-			case '?':
-				resultsContent += "Zero or one of previous\n"
+				resultsContent += metaStyle.Render("Any character") + "\n"
+			case '*', '+', '?':
+				resultsContent += quantStyle.Render("Zero or more of previous") + "\n"
 			case '[':
-				resultsContent += "Start character class\n"
+				resultsContent += metaStyle.Render("Start character class") + "\n"
 			case ']':
-				resultsContent += "End character class\n"
+				resultsContent += metaStyle.Render("End character class") + "\n"
 			case '{':
-				resultsContent += "Start quantifier\n"
+				resultsContent += quantStyle.Render("Start quantifier") + "\n"
 			case '}':
-				resultsContent += "End quantifier\n"
+				resultsContent += quantStyle.Render("End quantifier") + "\n"
 			case '|':
-				resultsContent += "Alternation (OR)\n"
+				resultsContent += metaStyle.Render("Alternation (OR)") + "\n"
 			default:
-				resultsContent += "Literal character\n"
+				resultsContent += literalStyle.Render("Literal character") + "\n"
 			}
 		}
 
 		if groupCount > 0 {
-			resultsContent += "\nCapture groups:\n"
+			resultsContent += "\n" + metaStyle.Render("Capture groups:") + "\n"
 			for i := 0; i < groupCount; i++ {
 				re, err := regexp.Compile(pattern)
 				if err == nil {
 					match := re.FindStringSubmatch(m.pipedContent)
 					if len(match) > i+1 {
-						resultsContent += fmt.Sprintf("Group %d: %q\n", i+1, match[i+1])
+						resultsContent += groupStyle.Render(fmt.Sprintf("Group %d: %q\n", i+1, match[i+1]))
 					}
 				}
 			}
 		}
 
-		resultsContent += fmt.Sprintf("\nTotal matches: %d", len(m.matches))
+		resultsContent += "\n" + metaStyle.Render(fmt.Sprintf("Total matches: %d", len(m.matches)))
 	} else {
-		resultsContent = "Enter a pattern to see explanation"
+		resultsContent = literalStyle.Render("Enter a pattern to see explanation")
 	}
 
 	// Create the results section (bottom-left)

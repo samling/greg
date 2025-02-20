@@ -1,41 +1,31 @@
 package internal
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"regexp"
-	"strings"
 
-	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
 	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	// blurredStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	cursorStyle = focusedStyle
-	noStyle     = lipgloss.NewStyle()
-
-	// focusedButton = focusedStyle.Render("[ Submit ]")
-	// blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Submit"))
+	cursorStyle  = focusedStyle
+	noStyle      = lipgloss.NewStyle()
 
 	// Layout styles
-	columnStyle = lipgloss.NewStyle().
-			PaddingLeft(2).
-			PaddingRight(2)
+	columnStyle = lipgloss.NewStyle()
 
 	inputBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(1)
+			BorderForeground(lipgloss.Color("240"))
 
 	resultsBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(1)
+			BorderForeground(lipgloss.Color("240"))
 
 	// Add new styles for pattern breakdown
 	groupStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))  // Cyan
@@ -44,16 +34,6 @@ var (
 	escapeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("148")) // Green
 	literalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // Light gray
 )
-
-type Model struct {
-	focusedIndex int
-	inputs       []textinput.Model
-	cursorMode   cursor.Mode
-	pipedContent string
-	width        int
-	height       int
-	matches      [][]int
-}
 
 func InitialModel() Model {
 	var pipedContent string
@@ -65,16 +45,25 @@ func InitialModel() Model {
 		}
 	}
 
+	contentViewport := viewport.New(0, 0)
+	contentViewport.SetContent(pipedContent)
 	m := Model{
-		inputs:       make([]textinput.Model, 1),
-		pipedContent: pipedContent,
+		inputs:          make([]textinput.Model, 1),
+		pipedContent:    pipedContent,
+		activeCell:      0,
+		scrollOffset:    0,
+		resultsViewport: viewport.New(0, 0),
+		contentViewport: contentViewport,
+		inputHeight:     2,
+		fullWidth:       0,
+		fullHeight:      0,
 	}
 
 	var t textinput.Model
 	for i := range m.inputs {
 		t = textinput.New()
 		t.Cursor.Style = cursorStyle
-		t.CharLimit = 32
+		t.CharLimit = 256 // todo: what should this actually be?
 
 		switch i {
 		case 0:
@@ -100,8 +89,8 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		m.fullWidth = msg.Width
+		m.fullHeight = msg.Height
 		return m, nil
 
 	case tea.KeyMsg:
@@ -109,72 +98,79 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 
-		// Change cursor mode
-		case "ctrl+r":
-			m.cursorMode++
-			if m.cursorMode > cursor.CursorHide {
-				m.cursorMode = cursor.CursorBlink
-			}
-			cmds := make([]tea.Cmd, len(m.inputs))
+		// Cycle between cells
+		case "tab", "shift+tab":
+			m.activeCell = (m.activeCell + 1) % 3
 			for i := range m.inputs {
-				cmds[i] = m.inputs[i].Cursor.SetMode(m.cursorMode)
-			}
-			return m, tea.Batch(cmds...)
-
-		// Set focus to next input
-		case "tab", "shift+tab", "enter", "up", "down":
-			s := msg.String()
-
-			// Quit on enter press when submit is highlighted
-			if s == "enter" && m.focusedIndex == len(m.inputs) {
-				return m, tea.Quit
-			}
-
-			// Cycle indexes
-			if s == "up" || s == "shift+tab" {
-				m.focusedIndex--
-			} else {
-				m.focusedIndex++
-			}
-
-			if m.focusedIndex > len(m.inputs) {
-				m.focusedIndex = 0
-			} else if m.focusedIndex < 0 {
-				m.focusedIndex = len(m.inputs)
-			}
-
-			cmds := make([]tea.Cmd, len(m.inputs))
-			for i := 0; i <= len(m.inputs)-1; i++ {
-				if i == m.focusedIndex {
-					cmds[i] = m.inputs[i].Focus()
-					m.inputs[i].PromptStyle = focusedStyle
-					m.inputs[i].TextStyle = focusedStyle
-					continue
-				}
 				m.inputs[i].Blur()
 				m.inputs[i].PromptStyle = noStyle
 				m.inputs[i].TextStyle = noStyle
 			}
+			if m.activeCell < len(m.inputs) {
+				m.inputs[m.activeCell].Focus()
+				m.inputs[m.activeCell].PromptStyle = focusedStyle
+				m.inputs[m.activeCell].TextStyle = focusedStyle
+			}
+			return m, nil
 
-			return m, tea.Batch(cmds...)
+		case "up", "k":
+			if m.activeCell == 1 {
+				m.contentViewport.LineUp(1)
+				return m, nil
+			} else if m.activeCell == 2 {
+				m.resultsViewport.LineUp(1)
+				return m, nil
+			}
+
+		case "ctrl+u":
+			if m.activeCell == 1 {
+				m.contentViewport.LineUp(8)
+				return m, nil
+			} else if m.activeCell == 2 {
+				m.resultsViewport.LineUp(8)
+				return m, nil
+			}
+
+		case "down", "j":
+			if m.activeCell == 1 {
+				m.contentViewport.LineDown(1)
+				return m, nil
+			} else if m.activeCell == 2 {
+				m.resultsViewport.LineDown(1)
+				return m, nil
+			}
+
+		case "ctrl+d":
+			if m.activeCell == 1 {
+				m.contentViewport.LineDown(8)
+				return m, nil
+			} else if m.activeCell == 2 {
+				m.resultsViewport.LineDown(8)
+				return m, nil
+			}
 		}
 
-		cmd := m.updateInputs(msg)
-		pattern := m.inputs[0].Value()
-		if pattern != "" {
-			if re, err := regexp.Compile(pattern); err == nil {
-				m.matches = re.FindAllStringIndex(m.pipedContent, -1)
+		if m.activeCell == 0 {
+			cmd := m.updateInputs(msg)
+			pattern := m.inputs[0].Value()
+			if pattern != "" {
+				if re, err := regexp.Compile(pattern); err == nil {
+					m.matches = re.FindAllStringIndex(m.pipedContent, -1)
+				} else {
+					m.matches = nil
+				}
 			} else {
 				m.matches = nil
 			}
-		} else {
-			m.matches = nil
-		}
 
-		return m, cmd
+			m.resultsViewport.SetContent(m.generateResultsContent())
+			return m, cmd
+		}
 	}
 
-	cmd := m.updateInputs(msg)
+	// cmd := m.updateInputs(msg)
+	var cmd tea.Cmd
+	m.resultsViewport, cmd = m.resultsViewport.Update(msg)
 	return m, cmd
 }
 
@@ -191,110 +187,9 @@ func (m Model) updateInputs(msg tea.Msg) tea.Cmd {
 }
 
 func (m Model) View() string {
-	// Get terminal dimensions
-	columnWidth := m.width / 2
-
-	// var buttonText string
-	// if m.focusedIndex == len(m.inputs) {
-	// 	buttonText = focusedButton
-	// } else {
-	// 	buttonText = blurredButton
-	// }
-
-	// Create input section (top-left)
-	inputSection := lipgloss.JoinVertical(lipgloss.Left,
-		m.inputs[0].View(),
-		// buttonText,
-	)
-	inputSection = inputBoxStyle.Width(columnWidth - 4).Render(inputSection)
-
-	var resultsContent string
-	if pattern := m.inputs[0].Value(); pattern != "" {
-		resultsContent = metaStyle.Render("Pattern breakdown:") + "\n"
-		groupLevel := 0
-		groupCount := 0
-		for i := 0; i < len(pattern); i++ {
-			char := rune(pattern[i])
-			indent := strings.Repeat("  ", groupLevel)
-			prefix := fmt.Sprintf("%s%d: %c - ", indent, i+1, char)
-
-			if char == '\\' && i < len(pattern)-1 {
-				i++
-				nextChar := pattern[i]
-				resultsContent += fmt.Sprintf("%s%d: \\%c - ", indent, i, nextChar)
-				desc := ""
-				switch nextChar {
-				case 'd':
-					desc = "Digit (0-9)"
-				case 'w':
-					desc = "Word character"
-				case 's':
-					desc = "Whitespace"
-				case 'b':
-					desc = "Word boundary"
-				default:
-					desc = fmt.Sprintf("Escaped character '%c'", nextChar)
-				}
-				resultsContent += escapeStyle.Render(desc) + "\n"
-				continue
-			}
-
-			resultsContent += prefix
-			switch char {
-			case '(':
-				groupLevel++
-				groupCount++
-				resultsContent += groupStyle.Render(fmt.Sprintf("Start group %d ↓", groupCount)) + "\n"
-			case ')':
-				resultsContent = strings.TrimSuffix(resultsContent, prefix)
-				groupLevel = max(0, groupLevel-1)
-				indent = strings.Repeat("  ", groupLevel)
-				resultsContent += fmt.Sprintf("%s%d: %c - ", indent, i+1, char) +
-					groupStyle.Render(fmt.Sprintf("End group %d ↑", groupLevel+1)) + "\n"
-			case '^', '$':
-				resultsContent += metaStyle.Render("Start of line") + "\n"
-			case '.':
-				resultsContent += metaStyle.Render("Any character") + "\n"
-			case '*', '+', '?':
-				resultsContent += quantStyle.Render("Zero or more of previous") + "\n"
-			case '[':
-				resultsContent += metaStyle.Render("Start character class") + "\n"
-			case ']':
-				resultsContent += metaStyle.Render("End character class") + "\n"
-			case '{':
-				resultsContent += quantStyle.Render("Start quantifier") + "\n"
-			case '}':
-				resultsContent += quantStyle.Render("End quantifier") + "\n"
-			case '|':
-				resultsContent += metaStyle.Render("Alternation (OR)") + "\n"
-			default:
-				resultsContent += literalStyle.Render("Literal character") + "\n"
-			}
-		}
-
-		if groupCount > 0 {
-			resultsContent += "\n" + metaStyle.Render("Capture groups:") + "\n"
-			for i := 0; i < groupCount; i++ {
-				re, err := regexp.Compile(pattern)
-				if err == nil {
-					match := re.FindStringSubmatch(m.pipedContent)
-					if len(match) > i+1 {
-						resultsContent += groupStyle.Render(fmt.Sprintf("Group %d: %q\n", i+1, match[i+1]))
-					}
-				}
-			}
-		}
-
-		resultsContent += "\n" + metaStyle.Render(fmt.Sprintf("Total matches: %d", len(m.matches)))
-	} else {
-		resultsContent = literalStyle.Render("Enter a pattern to see explanation")
-	}
-
-	// Create the results section (bottom-left)
-	resultsSection := resultsBoxStyle.
-		Width(columnWidth - 4).
-		Height(m.height - lipgloss.Height(inputSection) - 4).
-		Render(resultsContent)
+	// Render individual sections
+	inputSection := m.inputRender()
+	resultsSection := m.resultsRender()
 
 	// Create the left column
 	leftColumn := lipgloss.JoinVertical(lipgloss.Left,
@@ -303,41 +198,12 @@ func (m Model) View() string {
 	)
 	leftColumn = columnStyle.Render(leftColumn)
 
-	// Highlight matches in piped content
-	var highlightedContent string
-	if len(m.matches) > 0 {
-		lastIdx := 0
-		for _, match := range m.matches {
-			// Add non-matching text
-			highlightedContent += m.pipedContent[lastIdx:match[0]]
-			// Add highlighted matching text
-			matchText := m.pipedContent[match[0]:match[1]]
-			highlightedContent += focusedStyle.Render(matchText)
-			lastIdx = match[1]
-		}
-		// Add remaining text
-		highlightedContent += m.pipedContent[lastIdx:]
-	} else {
-		highlightedContent = m.pipedContent
-	}
+	// Render the right column section
+	rightColumn := m.contentRender()
 
-	// Create the right column
-	containerStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(1).
-		Width(columnWidth - 4)
-
-	contentHeight := m.height - 6
-
-	content := "Piped content:\n" + highlightedContent
-	rightColumn := containerStyle.
-		Height(m.height - 4).
-		Render(lipgloss.NewStyle().
-			Height(contentHeight).
-			MaxHeight(contentHeight).
-			Render(content))
-
-	// Join columns horizontally
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
+	// // Join columns horizontally
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		columnStyle.Render(leftColumn),
+		columnStyle.Render(rightColumn),
+	)
 }

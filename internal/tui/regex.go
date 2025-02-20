@@ -1,4 +1,4 @@
-package internal
+package tui
 
 import (
 	"fmt"
@@ -8,24 +8,26 @@ import (
 
 func (m *Model) parseRegexContent() string {
 	// Debug information
-	resultsContent := fmt.Sprintf(
-		"Debug Info:\n"+
-			"Input Height: %d\n"+
-			"Full Height: %d\n"+
-			"Full Width: %d\n"+
-			"Input Width: %d\n\n"+
-			"Active Cell: %d\n"+
-			"Results lines: %d\n",
-		m.inputHeight,
-		m.fullHeight,
-		m.fullWidth,
-		m.inputs[0].Width,
-		m.activeCell,
-		strings.Count(m.resultsViewport.View(), "\n"),
-	)
+	// resultsContent := fmt.Sprintf(
+	// 	"Debug Info:\n"+
+	// 		"Input Height: %d\n"+
+	// 		"Full Height: %d\n"+
+	// 		"Full Width: %d\n"+
+	// 		"Input Width: %d\n\n"+
+	// 		"Active Cell: %d\n"+
+	// 		"Results lines: %d\n",
+	// 	m.inputHeight,
+	// 	m.height,
+	// 	m.width,
+	// 	m.inputs[0].Width,
+	// 	m.activeCell,
+	// 	strings.Count(m.resultsViewport.View(), "\n"),
+	// )
+
+	var resultsContent string
 
 	if pattern := m.inputs[0].Value(); pattern != "" {
-		resultsContent += metaStyle.Render("Pattern breakdown:") + "\n"
+		resultsContent += metaStyle.Render("Pattern breakdown:") + "\n\n"
 		groupLevel := 0
 		groupCount := 0
 
@@ -91,22 +93,31 @@ func (m *Model) parseRegexContent() string {
 		}
 
 		if groupCount > 0 {
-			resultsContent += "\n" + metaStyle.Render("Capture groups:") + "\n"
-			for i := 0; i < groupCount; i++ {
-				re, err := regexp.Compile(pattern)
-				if err == nil {
-					match := re.FindStringSubmatch(m.pipedContent)
-					if len(match) > i+1 {
-						resultsContent += groupStyle.Render(fmt.Sprintf("Group %d: %q\n", i+1, match[i+1]))
-					}
-				}
-			}
+			m.hasCaptureGroups = true
+		} else {
+			m.hasCaptureGroups = false
 		}
 
-		resultsContent += "\n" + metaStyle.Render(fmt.Sprintf("Total matches: %d", len(m.matches)))
 	} else {
 		resultsContent = literalStyle.Render("Enter a pattern to see explanation")
 	}
 
 	return resultsContent
+}
+
+func (m *Model) parseCaptureGroups(pattern string) string {
+	var captureContent strings.Builder
+	captureContent.WriteString(metaStyle.Render("Capture groups:") + "\n\n")
+
+	re, err := regexp.Compile(pattern)
+	if err == nil {
+		match := re.FindStringSubmatch(m.pipedContent)
+		for i := 1; i < len(match); i++ {
+			groupNum := fmt.Sprintf("%d", i)
+			captureContent.WriteString(groupStyle.Render(fmt.Sprintf("Group %-1s: ", groupNum)))
+			captureContent.WriteString(literalStyle.Render(fmt.Sprintf("%q", match[i])) + "\n")
+		}
+	}
+
+	return captureContent.String()
 }

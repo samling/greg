@@ -11,30 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-var (
-	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	cursorStyle  = focusedStyle
-	noStyle      = lipgloss.NewStyle()
-
-	// Layout styles
-	columnStyle = lipgloss.NewStyle()
-
-	inputBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
-
-	resultsBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240"))
-
-	// Add new styles for pattern breakdown
-	groupStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("87"))  // Cyan
-	metaStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("213")) // Pink
-	quantStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // Orange
-	escapeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("148")) // Green
-	literalStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("250")) // Light gray
-)
-
 func InitialModel() Model {
 	var pipedContent string
 	stat, _ := os.Stdin.Stat()
@@ -54,7 +30,7 @@ func InitialModel() Model {
 		scrollOffset:    0,
 		resultsViewport: viewport.New(0, 0),
 		contentViewport: contentViewport,
-		inputHeight:     2,
+		inputHeight:     1,
 		fullWidth:       0,
 		fullHeight:      0,
 	}
@@ -163,7 +139,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.matches = nil
 			}
 
-			m.resultsViewport.SetContent(m.generateResultsContent())
+			m.resultsViewport.SetContent(m.parseRegexContent())
 			return m, cmd
 		}
 	}
@@ -187,11 +163,11 @@ func (m Model) updateInputs(msg tea.Msg) tea.Cmd {
 }
 
 func (m Model) View() string {
-	// Render individual sections
+	// Render the left column sections
 	inputSection := m.inputRender()
 	resultsSection := m.resultsRender()
 
-	// Create the left column
+	// Join the left column sections vertically
 	leftColumn := lipgloss.JoinVertical(lipgloss.Left,
 		inputSection,
 		resultsSection,
@@ -201,9 +177,9 @@ func (m Model) View() string {
 	// Render the right column section
 	rightColumn := m.contentRender()
 
-	// // Join columns horizontally
+	// Join columns horizontally
 	return lipgloss.JoinHorizontal(lipgloss.Top,
-		columnStyle.Render(leftColumn),
-		columnStyle.Render(rightColumn),
+		leftColumn,
+		rightColumn,
 	)
 }

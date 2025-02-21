@@ -11,16 +11,18 @@ import (
 )
 
 var (
-	pages      *tview.Pages
-	focusViews []tview.Primitive
-	leftSide   *tview.Flex
+	pages    *tview.Pages
+	leftSide *tview.Flex
 
-	matches          [][]int
+	focusViews []tview.Primitive
+
 	inputField       *tview.InputField
 	resultsView      *tview.TextView
 	contentView      *tview.TextView
 	captureView      *tview.TextView
 	captureViewAdded bool
+
+	matches [][]int
 )
 
 func SetupTUI(app *tview.Application, rawContent string) error {
@@ -247,20 +249,4 @@ func formatCaptureGroups(content string, re *regexp.Regexp) string {
 		}
 	}
 	return result.String()
-}
-
-func contains(slice []string, str string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

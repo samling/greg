@@ -54,6 +54,32 @@ func ExplainRegexPattern(pattern string) string {
 				explanation = fmt.Sprintf("Escape sequence for '%c'", nextChar)
 			}
 			i++ // Skip the next character
+		} else if char == '{' {
+			// Look ahead to parse the complete quantifier
+			end := i + 1
+			isValidQuantifier := false
+			// First, validate that this is a proper quantifier
+			for j := end; j < len(pattern); j++ {
+				if pattern[j] == '}' {
+					// Check if content between braces is valid (digits and maybe a comma)
+					content := pattern[end:j]
+					if isValidQuantifierContent(content) {
+						end = j
+						isValidQuantifier = true
+						break
+					}
+				}
+			}
+
+			if isValidQuantifier {
+				quantifier := pattern[i : end+1]
+				styledChar = fmt.Sprintf("[#ff8c00]%s[white]", quantifier) // Orange for quantifiers
+				explanation = getQuantifierExplanation(pattern[i : end+1])
+				i = end // Skip to end of quantifier
+			} else {
+				styledChar = fmt.Sprintf("[#808080]%c[white]", char) // Gray for literal characters
+				explanation = "Match this character literally"
+			}
 		} else if isMetaChar(char) {
 			styledChar = fmt.Sprintf("[#ff69b4]%c[white]", char) // Pink for meta characters
 			explanation = getCharacterExplanation(pattern, i, rune(char))
@@ -67,7 +93,25 @@ func ExplainRegexPattern(pattern string) string {
 				inCaptureGroup = max(0, inCaptureGroup-1)
 			}
 		} else if isQuantifier(char) {
-			styledChar = fmt.Sprintf("[#ff8c00]%c[white]", char) // Orange for quantifiers
+			if char == '}' {
+				// Look backwards to see if this closes a valid quantifier
+				start := i - 1
+				for start >= 0 && pattern[start] != '{' {
+					start--
+				}
+				if start >= 0 && start < i {
+					content := pattern[start+1 : i]
+					if isValidQuantifierContent(content) {
+						styledChar = fmt.Sprintf("[#ff8c00]%c[white]", char) // Orange for valid quantifiers
+					} else {
+						styledChar = fmt.Sprintf("[#808080]%c[white]", char) // Gray for literal characters
+					}
+				} else {
+					styledChar = fmt.Sprintf("[#808080]%c[white]", char) // Gray for literal characters
+				}
+			} else {
+				styledChar = fmt.Sprintf("[#ff8c00]%c[white]", char) // Orange for quantifiers
+			}
 			explanation = getCharacterExplanation(pattern, i, rune(char))
 		} else {
 			styledChar = fmt.Sprintf("[#808080]%c[white]", char) // Gray for literals
@@ -135,12 +179,101 @@ func getCharacterExplanation(pattern string, pos int, char rune) string {
 	case ')':
 		return "End group"
 	case '{':
-		return "Start quantifier"
+		// Look ahead to parse the quantifier
+		if pos < len(pattern)-1 {
+			end := pos + 1
+			for end < len(pattern) && pattern[end] != '}' {
+				end++
+			}
+			if end < len(pattern) {
+				quantifier := pattern[pos+1 : end]
+				parts := strings.Split(quantifier, ",")
+
+				if len(parts) == 2 {
+					if parts[1] == "" {
+						return fmt.Sprintf("Match previous character at least %s times", parts[0])
+					}
+					return fmt.Sprintf("Match previous character between %s and %s times", parts[0], parts[1])
+				} else if len(parts) == 1 && parts[0] != "" {
+					return fmt.Sprintf("Match previous character exactly %s times", parts[0])
+				}
+			}
+		}
+		return "Invalid quantifier"
 	case '}':
-		return "End quantifier"
+		// Look backwards to see if this closes a valid quantifier
+		start := pos - 1
+		for start >= 0 && pattern[start] != '{' {
+			start--
+		}
+		if start >= 0 && start < pos {
+			// Check if the content between { and } is a valid quantifier
+			content := pattern[start+1 : pos]
+			if isValidQuantifierContent(content) {
+				return "Closes quantifier range"
+			}
+		}
+		return "Match this character literally"
 	case '|':
 		return "Alternation (OR)"
 	default:
 		return "Match this character literally"
 	}
+}
+
+// Add new helper function
+func getQuantifierExplanation(quantifier string) string {
+	// Strip the braces
+	content := quantifier[1 : len(quantifier)-1]
+	parts := strings.Split(content, ",")
+
+	if len(parts) == 2 {
+		if parts[1] == "" {
+			return fmt.Sprintf("Match %s or more of the preceding token", parts[0])
+		}
+		return fmt.Sprintf("Match between %s and %s of the preceding token", parts[0], parts[1])
+	} else if len(parts) == 1 && parts[0] != "" {
+		return fmt.Sprintf("Match exactly %s of the preceding token", parts[0])
+	}
+	return "Invalid quantifier"
+}
+
+// Add new helper function to validate quantifier content
+func isValidQuantifierContent(content string) bool {
+	if content == "" {
+		return false
+	}
+
+	parts := strings.Split(content, ",")
+	if len(parts) > 2 {
+		return false
+	}
+
+	// Check first number
+	if !isNumeric(parts[0]) {
+		return false
+	}
+
+	// If there's a second part (for ranges like {2,4})
+	if len(parts) == 2 {
+		// Allow empty second part for {n,} syntax
+		if parts[1] != "" && !isNumeric(parts[1]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Helper function to check if a string is numeric
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
